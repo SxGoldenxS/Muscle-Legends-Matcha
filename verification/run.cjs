@@ -4,7 +4,7 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require('fengari');
 
 async function main() {
   const port = fs.readFileSync(path.join(__dirname, '..', 'matcha.lua'), 'utf8');
-  const url = port.match(/https:\/\/gitlab\.com\/astra-group5825243\/rem-ui\/-\/raw\/[a-f0-9]{40}\/rem_v6-matcha\.lua/)[0];
+  const url = port.match(/https:\/\/gitlab\.com\/ellijahheath\/rem-ui\/-\/raw\/[a-f0-9]{40}\/rem_v6-matcha\.lua/)[0];
   let rem;
   if (process.argv[2]) rem = fs.readFileSync(process.argv[2], 'utf8');
   else {

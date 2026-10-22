@@ -1,9 +1,9 @@
 # Muscle Legends for Matcha
 
-Muscle Legends automation using [REM UI](https://gitlab.com/astra-group5825243/rem-ui). Requires Matcha with Hybrid Mode enabled and Muscle Legends place `3623096087`.
+Muscle Legends automation using [REM UI](https://gitlab.com/ellijahheath/rem-ui). Requires Matcha with Hybrid Mode enabled and Muscle Legends place `3623096087`.
 
 ```lua
-loadstring(game:HttpGet("https://gitlab.com/astra-group5825243/muscle-legends-matcha/-/raw/main/loader.lua"))()
+loadstring(game:HttpGet("https://gitlab.com/ellijahheath/muscle-legends-matcha/-/raw/main/loader.lua"))()
 ```
 
 Right Shift opens/closes the menu. End unloads it. Hub settings save to `muscle-legends-matcha-settings.json` and restore on reload. Your initial preset enables direct training at 5 requests/sec, auto rebirth, Ultimate upgrades, keep-size-2, and auto equip best. Rerunning stops the previous hub without overwriting saved toggles with teardown values.

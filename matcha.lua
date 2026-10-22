@@ -969,7 +969,7 @@ local statusLabel, statsLabel, totalsLabel, rebirthLabel, ultimateLabel, trainin
 
 local function setupREM()
     -- Pin the reviewed REM revision so later upstream API changes cannot break this port.
-    local url = "https://gitlab.com/astra-group5825243/rem-ui/-/raw/767973251d7985442642a47757ce3fba0a5736f1/rem_v6-matcha.lua"
+    local url = "https://gitlab.com/ellijahheath/rem-ui/-/raw/767973251d7985442642a47757ce3fba0a5736f1/rem_v6-matcha.lua"
     local cache = "rem-v6-matcha-7679732.lua"
     local source
     if type(isfile) == "function" and isfile(cache) then source = readfile(cache)
