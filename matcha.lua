@@ -126,6 +126,33 @@ local function antiAfkStatus(text)
     antiAfk.status = text
 end
 
+local AFK_BRIDGE = "muscle-legends-anti-afk.ini"
+local AFK_HELPER = "muscle-legends-anti-afk-helper.ini"
+local function writeAfkBridge(enabled)
+    antiAfk.serial = (antiAfk.serial or 0) + 1
+    if type(writefile) == "function" then
+        pcall(writefile, AFK_BRIDGE, "[session]\nenabled=" .. (enabled and "1" or "0")
+            .. "\nserial=" .. antiAfk.serial .. "\njob=" .. tostring(game.JobId) .. "\n")
+    end
+end
+
+local function backgroundAfkStatus()
+    if type(isfile) ~= "function" or not isfile(AFK_HELPER) then return nil end
+    local ok, text = pcall(readfile, AFK_HELPER)
+    if not ok or type(text) ~= "string" then return nil end
+    local ack = tonumber(string.match(text, "ack=(%d+)"))
+    local count = tonumber(string.match(text, "count=(%d+)"))
+    local status = string.match(text, "status=([^\r\n]+)")
+    local serial = antiAfk.serial or 0
+    if not ack or ack > serial or ack < serial-3 or not count or not status
+        or string.find(status, "Stopped", 1, true) or string.find(status, "Paused:", 1, true) then return nil end
+    if count > (antiAfk.backgroundPulses or 0) then
+        antiAfk.backgroundPulses = count
+        antiAfk.nextPulse = tick() + AFK_INTERVAL
+    end
+    return "Background helper: " .. status
+end
+
 local function releaseAntiAfkKey()
     if not antiAfk.held then return true end
     local ok, result = pcall(keyrelease, AFK_KEY)
@@ -134,12 +161,16 @@ local function releaseAntiAfkKey()
 end
 
 local function keepActive()
+    local helper = backgroundAfkStatus()
+    if helper then antiAfkStatus(helper) return end
+    if type(isrbxactive) == "function" and not isrbxactive() then
+        antiAfkStatus("Waiting for Roblox focus or background helper") return
+    end
     if tick() < antiAfk.nextPulse then return end
     assert(type(keypress) == "function" and type(keyrelease) == "function"
         and type(iskeypressed) == "function" and type(isrbxactive) == "function"
         and type(ismouse1pressed) == "function" and type(ismouse2pressed) == "function",
         "Matcha input APIs unavailable")
-    if not isrbxactive() then antiAfkStatus("Waiting for Roblox focus") return end
     if antiAfk.held then assert(releaseAntiAfkKey(), "Cannot release anti-AFK key") end
     if iskeypressed(AFK_KEY) or iskeypressed(0x10) or iskeypressed(0x11) or iskeypressed(0x12)
         or ismouse1pressed() or ismouse2pressed() then
@@ -928,6 +959,7 @@ local function toggle(key)
     if key == "fastPunch" and not options.fastPunch then restoreValues("punch") end
     if key == "noclip" and not options.noclip then restoreCollisions() end
     if key == "antiAfk" then
+        writeAfkBridge(options.antiAfk)
         if not options.antiAfk then releaseAntiAfkKey() end
         antiAfk.nextPulse = tick() + AFK_INTERVAL
         antiAfkStatus(options.antiAfk and "Waiting for first pulse" or "Off")
@@ -991,7 +1023,7 @@ local pages = {
         { "No clip", "noclip", "toggle" },
     } },
     { name = "Utility", rows = {
-        { "Anti AFK (Roblox focused)", "antiAfk", "toggle" },
+        { "Anti AFK (with background helper)", "antiAfk", "toggle" },
         { "Auto equip best pets", "equipBest", "toggle" },
         { "Equip best pets", action = function() remote("equipPetEvent", "equipBest") say("Equip best requested") end },
         { "Hide pets", action = function() remote("showPetsEvent", "hidePets") say("Hide pets requested") end },
@@ -1001,7 +1033,7 @@ local pages = {
         { "Size 1 now", action = function() remote("changeSpeedSizeRemote", "changeSize", 1) say("Size 1 requested") end },
         { "Stop all automation", action = function()
             training.travel = nil
-            options.antiAfk = false releaseAntiAfkKey() antiAfkStatus("Off")
+            options.antiAfk = false writeAfkBridge(false) releaseAntiAfkKey() antiAfkStatus("Off")
             options.ultimates, options.equipBest = false, false
             options.train, options.punch, options.rebirth, options.small = false, false, false, false
             options.combat, options.fastPunch, options.noclip = 1, false, false
@@ -1153,6 +1185,7 @@ function app.Stop()
     if not app.running then return end
     saveSettings()
     app.running = false
+    writeAfkBridge(false)
     releaseAntiAfkKey()
     for key, value in pairs(options) do if type(value) == "boolean" then options[key] = false end end
     options.combat, pendingChest = 1, nil
@@ -1193,14 +1226,16 @@ local ok, setupError = pcall(function()
         if event.KeyCode == 35 then app.Stop() end
     end)
     syncControls()
+    writeAfkBridge(options.antiAfk)
     saveSettings()
 end)
 if not ok then app.Stop() error(setupError) end
 
 task.spawn(function()
     while app.running do
+        job("antiAfkBridge", true, 5, function() writeAfkBridge(options.antiAfk) end)
         job("antiAfk", options.antiAfk, 1, keepActive, function()
-            options.antiAfk = false releaseAntiAfkKey()
+            options.antiAfk = false writeAfkBridge(false) releaseAntiAfkKey()
         end)
         job("actors", true, 0.4, collectActors, function() app.Stop() end)
         job("parts", options.noclip, 1, collectCharacterParts, function() options.noclip = false end)
