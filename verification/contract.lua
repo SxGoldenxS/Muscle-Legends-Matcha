@@ -209,7 +209,7 @@ local settingsFile = "muscle-legends-matcha-settings.json"
 local function resetSettings()
     files[settingsFile] = jsonEncode({ version=1, options={train=false,exercise=1,rate=2,fastPunch=false,
         rebirth=false,ultimates=false,equipBest=false,small=false,punch=false,combat=1,target=0,
-        camp=false,noclip=false,chests=false,location=1} })
+        camp=false,noclip=false,chests=false,location=1,antiAfk=false} })
 end
 local controls={}
 local function makeREM()
@@ -748,5 +748,77 @@ check("fresh and malformed preferences use the user's requested defaults",functi
     assert(not controls["Auto train"].Value and not controls["Keep size 2 (every 2s)"].Value)
     assert(controls["Exercise"].Value=="Direct reps" and controls["Requests / second"].Value=="5")
     _G.MuscleLegendsMatcha.Stop()
+end)
+local afkInput
+local function resetAfkInput()
+    afkInput={active=true,keys={},events={},mouse1=false,mouse2=false}
+end
+function isrbxactive() return afkInput.active end
+function iskeypressed(key) return afkInput.keys[key]==true end
+function ismouse1pressed() return afkInput.mouse1 end
+function ismouse2pressed() return afkInput.mouse2 end
+function keypress(key)
+    afkInput.events[#afkInput.events+1]={kind="press",key=key,time=now}
+    afkInput.keys[key]=true
+    if afkInput.failPress then error("Input failure after key-down") end
+    return true
+end
+function keyrelease(key)
+    afkInput.events[#afkInput.events+1]={kind="release",key=key,time=now}
+    if afkInput.failReleaseOnce then afkInput.failReleaseOnce=false return false end
+    afkInput.keys[key]=false return true
+end
+local function afkFixture()
+    rebirthFixture(100,0)
+    resetAfkInput()
+    set("Anti AFK (Roblox focused)",true)
+end
+check("anti-AFK sends one paired neutral key pulse after the interval",function()
+    afkFixture()
+    local moves,remoteCount=counts.positionWrites,#requests
+    advance(119) assert(#afkInput.events==0)
+    advance(2)
+    assert(#afkInput.events==2 and afkInput.events[1].kind=="press" and afkInput.events[2].kind=="release")
+    assert(afkInput.events[1].key==0x7E and afkInput.events[2].key==0x7E and not iskeypressed(0x7E))
+    assert(counts.positionWrites==moves and #requests==remoteCount)
+    advance(60) assert(#afkInput.events==2)
+end)
+check("anti-AFK never injects input into an unfocused application",function()
+    afkFixture() afkInput.active=false
+    advance(130) assert(#afkInput.events==0)
+    assert(controls["Anti-AFK"].Description=="Waiting for Roblox focus")
+    afkInput.active=true advance(2) assert(#afkInput.events==2)
+end)
+check("anti-AFK waits for held keys, mouse input and rebirths",function()
+    afkFixture() afkInput.keys[0x11]=true
+    advance(122) assert(#afkInput.events==0)
+    afkInput.keys[0x11]=false afkInput.mouse1=true advance(2) assert(#afkInput.events==0)
+    afkInput.mouse1=false charData.attrs.IsRebirthing=true advance(2) assert(#afkInput.events==0)
+    charData.attrs.IsRebirthing=nil advance(2) assert(#afkInput.events==2)
+end)
+check("real keyboard input postpones anti-AFK without adding a worker",function()
+    afkFixture() advance(110)
+    for _,handle in ipairs(inputHandles) do if handle.active then handle.callback({KeyCode=65}) end end
+    advance(119) assert(#afkInput.events==0)
+    advance(4) assert(#afkInput.events==2 and activeThreads()==1, "events="..#afkInput.events.." threads="..activeThreads().." status="..tostring(controls["Anti-AFK"].Description))
+end)
+check("anti-AFK always releases a partial key press and isolates failures",function()
+    afkFixture() afkInput.failPress=true
+    set("Auto train",true) advance(122)
+    assert(not iskeypressed(0x7E) and #afkInput.events==2)
+    assert(not controls["Anti AFK (Roblox focused)"].Value and controls["Auto train"].Value)
+    assert(_G.MuscleLegendsMatcha.running)
+end)
+check("a failed key release is retried during anti-AFK cleanup",function()
+    afkFixture() afkInput.failReleaseOnce=true advance(122)
+    assert(#afkInput.events==3 and not iskeypressed(0x7E))
+    assert(not controls["Anti AFK (Roblox focused)"].Value)
+end)
+check("anti-AFK stops cleanly on disable and unload",function()
+    afkFixture() advance(121) assert(#afkInput.events==2)
+    set("Anti AFK (Roblox focused)",false) advance(130)
+    assert(#afkInput.events==2)
+    set("Anti AFK (Roblox focused)",true) _G.MuscleLegendsMatcha.Stop() advance(130)
+    assert(#afkInput.events==2 and not iskeypressed(0x7E) and activeThreads()==0)
 end)
 originalPrint(string.format("%d contract checks passed; port and actual REM source compile.",passed))

@@ -26,7 +26,7 @@ local options = {
     train = true, exercise = 1, rate = 1, fastPunch = false,
     rebirth = true, ultimates = true, equipBest = true, small = true, punch = false, combat = 1,
     target = 0, camp = false, noclip = false, chests = false,
-    location = 1,
+    location = 1, antiAfk = true,
 }
 local exercises = { "Direct reps", "Weight", "Pushups", "Handstands", "Situps", "Cycle exercises", "Best strength source" }
 local BEST_STRENGTH = 7
@@ -63,6 +63,8 @@ local message = "Ready. Saved settings restored; Hybrid Mode required."
 local started = tick()
 local sessionBaseline, sessionText = {}, "Waiting for game stats"
 local counters = { requests = 0, moves = 0 }
+local AFK_KEY, AFK_INTERVAL = 0x7E, 120 -- F15: not a hub hotkey or movement key.
+local antiAfk = { nextPulse = tick() + AFK_INTERVAL, held = false, status = "Waiting for first pulse" }
 local rebirthState = { status = "Off", nextAttempt = 0, failures = 0, inFlight = false }
 local ultimateState = { status = "Off", nextAttempt = 0, inFlight = false }
 local petState = { force = true, nextCheck = 0 }
@@ -117,6 +119,45 @@ local function say(text)
     if UI and UI.Alive then
         UI:Notify({ Title = "Muscle Legends", Content = message, Duration = 4 })
     end
+end
+
+local function antiAfkStatus(text)
+    if antiAfk.status ~= text then dirty = true end
+    antiAfk.status = text
+end
+
+local function releaseAntiAfkKey()
+    if not antiAfk.held then return true end
+    local ok, result = pcall(keyrelease, AFK_KEY)
+    if ok and result ~= false then antiAfk.held = false return true end
+    return false
+end
+
+local function keepActive()
+    if tick() < antiAfk.nextPulse then return end
+    assert(type(keypress) == "function" and type(keyrelease) == "function"
+        and type(iskeypressed) == "function" and type(isrbxactive) == "function"
+        and type(ismouse1pressed) == "function" and type(ismouse2pressed) == "function",
+        "Matcha input APIs unavailable")
+    if not isrbxactive() then antiAfkStatus("Waiting for Roblox focus") return end
+    if antiAfk.held then assert(releaseAntiAfkKey(), "Cannot release anti-AFK key") end
+    if iskeypressed(AFK_KEY) or iskeypressed(0x10) or iskeypressed(0x11) or iskeypressed(0x12)
+        or ismouse1pressed() or ismouse2pressed() then
+        antiAfkStatus("Waiting for held input to finish") return
+    end
+    local char = player.Character
+    if not char or char:GetAttribute("IsRebirthing") == true or char:GetAttribute("LastMapCFrame") ~= nil
+        or rebirthState.inFlight or rebirthState.waitingCount ~= nil
+        or ultimateState.inFlight or ultimateState.pending or training.busy then
+        antiAfkStatus("Waiting for game operation to finish") return
+    end
+    -- No yield between press and release. Do not change Matcha's input-routing setting.
+    antiAfk.held = true
+    local ok, result = pcall(keypress, AFK_KEY)
+    local released = releaseAntiAfkKey()
+    assert(ok and result ~= false and released, "Anti-AFK key pulse failed")
+    antiAfk.nextPulse = tick() + AFK_INTERVAL
+    antiAfkStatus("F15 pulse sent; next after 120s without keyboard input")
 end
 
 local function getTool(name)
@@ -886,6 +927,11 @@ local function toggle(key)
     if key == "train" and not options.train then restoreValues("training") end
     if key == "fastPunch" and not options.fastPunch then restoreValues("punch") end
     if key == "noclip" and not options.noclip then restoreCollisions() end
+    if key == "antiAfk" then
+        if not options.antiAfk then releaseAntiAfkKey() end
+        antiAfk.nextPulse = tick() + AFK_INTERVAL
+        antiAfkStatus(options.antiAfk and "Waiting for first pulse" or "Off")
+    end
     if key == "equipBest" and options.equipBest then
         petState.force, petState.nextCheck, deadlines.pets = true, 0, 0
     end
@@ -945,6 +991,7 @@ local pages = {
         { "No clip", "noclip", "toggle" },
     } },
     { name = "Utility", rows = {
+        { "Anti AFK (Roblox focused)", "antiAfk", "toggle" },
         { "Auto equip best pets", "equipBest", "toggle" },
         { "Equip best pets", action = function() remote("equipPetEvent", "equipBest") say("Equip best requested") end },
         { "Hide pets", action = function() remote("showPetsEvent", "hidePets") say("Hide pets requested") end },
@@ -954,6 +1001,7 @@ local pages = {
         { "Size 1 now", action = function() remote("changeSpeedSizeRemote", "changeSize", 1) say("Size 1 requested") end },
         { "Stop all automation", action = function()
             training.travel = nil
+            options.antiAfk = false releaseAntiAfkKey() antiAfkStatus("Off")
             options.ultimates, options.equipBest = false, false
             options.train, options.punch, options.rebirth, options.small = false, false, false, false
             options.combat, options.fastPunch, options.noclip = 1, false, false
@@ -964,7 +1012,7 @@ local pages = {
     } },
 }
 
-local statusLabel, statsLabel, totalsLabel, rebirthLabel, ultimateLabel, trainingLabel, targetOptionsSignature
+local statusLabel, statsLabel, totalsLabel, rebirthLabel, ultimateLabel, trainingLabel, antiAfkLabel, targetOptionsSignature
 
 
 local function setupREM()
@@ -990,6 +1038,7 @@ local function setupREM()
     UI:SetTitle("Muscle Legends")
     UI:SetSubtitle("Matcha edition")
     statusLabel = UI.Home:AddLabel({ Title = "Status", Description = message })
+    antiAfkLabel = UI.Home:AddLabel({ Title = "Anti-AFK", Description = antiAfk.status })
     trainingLabel = UI.Home:AddLabel({ Title = "Training source", Description = training.status })
     statsLabel = UI.Home:AddLabel({ Title = "Session gains", Description = sessionText })
     totalsLabel = UI.Home:AddLabel({ Title = "Activity", Description = "No requests sent" })
@@ -997,7 +1046,7 @@ local function setupREM()
     ultimateLabel = UI.Home:AddLabel({ Title = "Ultimate upgrades", Description = "Cheapest first. Keep 100 rebirths. Off." })
     UI.Home:AddLabel({ Title = "Controls", Description = "Right Shift: menu. End: unload. Hub settings save automatically." })
     UI.Home:AddLabel({ Title = "Compatibility", Description = "Requires Hybrid Mode. Remote rewards need live verification. Distant-location camp is not invulnerability." })
-    UI.Home:AddLabel({ Title = "Not ported", Description = "Walk/jump edits, infinite jump, lock position, anti-fling, water platforms, invisibility, anti-AFK and server hopping require unsupported or unverified APIs." })
+    UI.Home:AddLabel({ Title = "Not ported", Description = "Walk/jump edits, infinite jump, lock position, anti-fling, water platforms, invisibility and server hopping require unsupported or unverified APIs." })
     for _, definition in ipairs(pages) do
         local tab = UI:AddTab({ Title = definition.name, Category = "Muscle Legends" })
         for _, row in ipairs(definition.rows) do
@@ -1072,6 +1121,7 @@ local function setupREM()
         targetOptionsSignature = signature
         statusLabel:SetDescription(message)
         statsLabel:SetDescription(sessionText)
+        antiAfkLabel:SetDescription(options.antiAfk and antiAfk.status or "Off")
         trainingLabel:SetDescription(options.train and training.status or "Off")
         rebirthLabel:SetDescription(rebirthState.status)
         ultimateLabel:SetDescription((options.ultimates and "Cheapest first | " or "Off | ") .. ultimateState.status)
@@ -1103,6 +1153,7 @@ function app.Stop()
     if not app.running then return end
     saveSettings()
     app.running = false
+    releaseAntiAfkKey()
     for key, value in pairs(options) do if type(value) == "boolean" then options[key] = false end end
     options.combat, pendingChest = 1, nil
     if inputConnection then pcall(function() inputConnection:Disconnect() end) end
@@ -1138,6 +1189,7 @@ local ok, setupError = pcall(function()
     setupREM()
     collectActors()
     inputConnection = Input.InputBegan:Connect(function(event)
+        if event.KeyCode ~= AFK_KEY then antiAfk.nextPulse = tick() + AFK_INTERVAL end
         if event.KeyCode == 35 then app.Stop() end
     end)
     syncControls()
@@ -1147,6 +1199,9 @@ if not ok then app.Stop() error(setupError) end
 
 task.spawn(function()
     while app.running do
+        job("antiAfk", options.antiAfk, 1, keepActive, function()
+            options.antiAfk = false releaseAntiAfkKey()
+        end)
         job("actors", true, 0.4, collectActors, function() app.Stop() end)
         job("parts", options.noclip, 1, collectCharacterParts, function() options.noclip = false end)
         job("releaseMachine", not options.train or options.exercise ~= BEST_STRENGTH, 0.25, function()
